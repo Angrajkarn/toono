@@ -1,0 +1,71 @@
+# Fully Automated Cartoon Channel Config - EDIT ONCE, THEN FORGET
+# Toonora Channel: https://www.youtube.com/@Toonora-n8i
+channel:
+  name: "Toonora"
+  description: "Daily funny cartoons for kids! Join Bip, Gloop, Pip, Zap & Snooze! 🎬 New shorts Mon-Fri, episodes Saturday!"
+  language: "en"
+  made_for_kids: true
+
+schedule:
+  # Runs automatically - no manual triggers needed
+  shorts_per_week: 5      # Mon-Fri
+  episode_per_week: 1     # Saturday
+  upload_time: "10:00"    # Local time (IST)
+  timezone: "Asia/Kolkata"
+
+characters:
+  bip:
+    color: "#0099FF"
+    voice: "en-US-GuyNeural"
+    personality: "Curious leader, energetic"
+  gloop:
+    color: "#00CC66"
+    voice: "en-US-EricNeural"
+    personality: "Goofy shape-shifter"
+  pip:
+    color: "#FF66CC"
+    voice: "en-GB-SoniaNeural"
+    personality: "Smart fact-checker"
+  zap:
+    color: "#FFCC00"
+    voice: "en-US-JennyNeural"
+    personality: "Speedster, excitable"
+  snooze:
+    color: "#9966FF"
+    voice: "en-US-RogerNeural"
+    personality: "Sleepy dreamer"
+
+video:
+  shorts:
+    duration_target: 20     # seconds
+    resolution: [1080, 1920]  # Vertical for Shorts
+    fps: 30
+    model_style: "cutout"
+  episode:
+    duration_target: 120    # seconds (2 min)
+    resolution: [1920, 1080]  # Horizontal for episodes
+    fps: 30
+    model_style: "cutout"
+
+render:
+  quality: "fast"        # fast/medium/slow - fast = less CPU time
+  threads: 4             # Adjust for your laptop
+  codec: "libx264"
+  audio_codec: "aac"
+
+paths:
+  assets: "assets"
+  output: "output"
+  logs: "logs"
+  temp: "temp"
+
+youtube:
+  category_id: "20"      # Entertainment
+  privacy: "public"
+  tags_base: ["cartoon", "kids", "funny", "animation", "children", "toonora"]
+  shorts_hashtag: true
+
+automation:
+  run_mode: "github_actions"  # "local" or "github_actions"
+  github_repo: "Angrajkarn/toono"  # Your GitHub repo
+  keep_days: 30               # Clean up old render files

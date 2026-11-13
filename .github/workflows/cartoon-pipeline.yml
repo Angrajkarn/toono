@@ -1,0 +1,178 @@
+# 🎬 FULLY AUTOMATED CARTOON CHANNEL - GitHub Actions Workflow
+# =============================================================
+# This runs COMPLETELY FREE on GitHub's servers!
+# No laptop needed. Runs on schedule automatically.
+#
+# SETUP:
+# 1. Push this repo to GitHub
+# 2. Add these SECRETS in GitHub repo Settings → Secrets → Actions:
+#    - YOUTUBE_CLIENT_SECRET: (base64 encoded client_secret.json)
+#    - YOUTUBE_TOKEN: (base64 encoded token.pkl after first auth)
+#    - CONFIG_YAML: (base64 encoded config.yaml)
+# 3. Enable Actions in repo Settings
+# 4. It runs automatically every week!
+#
+# TO ENCODE SECRETS (run locally once):
+#   base64 -w 0 client_secret.json | pbcopy  # Mac
+#   base64 -w 0 client_secret.json | clip    # Windows
+#   base64 -w 0 token.pkl | pbcopy
+#   base64 -w 0 config.yaml | pbcopy
+
+name: 🎬 Weekly Cartoon Pipeline
+
+on:
+  schedule:
+    # Runs every Monday at 10:00 UTC (adjust for your timezone)
+    - cron: '0 10 * * 1'  # Monday 10 AM UTC
+  workflow_dispatch:      # Manual trigger from GitHub UI
+    inputs:
+      week:
+        description: 'Week number (1-52, empty = auto)'
+        required: false
+        type: string
+      force:
+        description: 'Force re-run even if done'
+        required: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hours max (GitHub free limit)
+
+    steps:
+      # ─── CHECKOUT ───
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # ─── SETUP PYTHON ───
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ─── INSTALL SYSTEM DEPENDENCIES ───
+      - name: 📦 Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            libcairo2 \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libgdk-pixbuf-2.0-0 \
+            libffi-dev \
+            shared-mime-info \
+            inkscape \
+            texlive-latex-base \
+            texlive-fonts-recommended \
+            texlive-fonts-extra \
+            texlive-latex-extra
+
+      # ─── INSTALL PYTHON DEPENDENCIES ───
+      - name: 📦 Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ─── DECODE SECRETS ───
+      - name: 🔐 Decode secrets
+        run: |
+          echo "${{ secrets.YOUTUBE_CLIENT_SECRET }}" | base64 -d > client_secret.json
+          echo "${{ secrets.YOUTUBE_TOKEN }}" | base64 -d > token.pkl
+          echo "${{ secrets.CONFIG_YAML }}" | base64 -d > config.yaml
+
+      # ─── GENERATE ASSETS (if not cached) ───
+      - name: 🎨 Generate assets
+        run: python generate_assets.py
+
+      # ─── DETERMINE WEEK ───
+      - name: 📅 Determine week number
+        id: week
+        run: |
+          if [ -n "${{ github.event.inputs.week }}" ]; then
+            echo "week=${{ github.event.inputs.week }}" >> $GITHUB_OUTPUT
+          else
+            # Auto-calculate from config start_date or default
+            python -c "
+            import yaml, datetime
+            with open('config.yaml') as f:
+                cfg = yaml.safe_load(f)
+            start_str = cfg.get('automation', {}).get('start_date', '2025-01-06')
+            start = datetime.datetime.strptime(start_str, '%Y-%m-%d')
+            now = datetime.datetime.utcnow()
+            week = ((now - start).days // 7) + 1
+            week = max(1, min(week, 52))
+            print(f'week={week}')
+            " >> $GITHUB_OUTPUT
+          fi
+
+      # ─── GENERATE SCRIPTS ───
+      - name: 📝 Generate scripts
+        run: python generate_scripts.py --week ${{ steps.week.outputs.week }}
+
+      # ─── GENERATE AUDIO ───
+      - name: 🎙️ Generate voiceovers (Edge TTS)
+        run: python generate_audio.py --week ${{ steps.week.outputs.week }}
+
+      # ─── RENDER VIDEOS ───
+      - name: 🎬 Render videos (MoviePy)
+        run: python animate.py --week ${{ steps.week.outputs.week }}
+        env:
+          # Speed up rendering on GitHub runners
+          MOVIE_THREADS: 2
+
+      # ─── UPLOAD TO YOUTUBE ───
+      - name: 📤 Upload to YouTube
+        run: python upload.py --week ${{ steps.week.outputs.week }}
+
+      # ─── CLEANUP ───
+      - name: 🧹 Cleanup temp files
+        if: always()
+        run: |
+          rm -rf temp/
+          find output -name "*.png" -delete
+          find output -name "*.wav" -delete
+
+      # ─── NOTIFICATION ───
+      - name: 📢 Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Pipeline failed - Week ${{ steps.week.outputs.week }}`,
+              body: `Automated cartoon pipeline failed. Check workflow run: ${context.runUrl}`,
+              labels: ['bug', 'pipeline-failure']
+            })
+
+# ─── OPTIONAL: DAILY SHORTS ONLY (lighter, runs daily) ───
+# Uncomment to run shorts daily instead of weekly batch
+#
+# name: 🎬 Daily Short
+# on:
+#   schedule:
+#     - cron: '0 10 * * *'  # Daily 10 AM UTC
+# jobs:
+#   daily-short:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-python@v5
+#         with: { python-version: '3.11' }
+#       - run: sudo apt-get update && sudo apt-get install -y ffmpeg inkscape
+#       - run: pip install -r requirements.txt
+#       - run: echo "${{ secrets.YOUTUBE_CLIENT_SECRET }}" | base64 -d > client_secret.json
+#       - run: echo "${{ secrets.YOUTUBE_TOKEN }}" | base64 -d > token.pkl
+#       - run: echo "${{ secrets.CONFIG_YAML }}" | base64 -d > config.yaml
+#       - run: python generate_assets.py
+#       - run: python generate_scripts.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.utcnow()-s).days//7)+1; print(max(1,min(w,52)))")
+#       - run: python generate_audio.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.utcnow()-s).days//7)+1; print(max(1,min(w,52)))")
+#       - run: python animate.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.utcnow()-s).days//7)+1; print(max(1,min(w,52)))")
+#       - run: python upload.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.utcnow()-s).days//7)+1; print(max(1,min(w,52)))")

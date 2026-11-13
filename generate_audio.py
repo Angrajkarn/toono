@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""
+Generate ALL voiceovers automatically using FREE Edge TTS (Microsoft)
+Run: python generate_audio.py --week 1
+"""
+import asyncio
+import json
+import sys
+import yaml
+import edge_tts
+from pathlib import Path
+
+def load_config():
+    with open("config.yaml") as f:
+        return yaml.safe_load(f)
+
+# Voice mapping - all FREE Microsoft Edge voices
+VOICES = {
+    "bip": "en-US-GuyNeural",       # Energetic kid
+    "gloop": "en-US-EricNeural",    # Goofy, deeper
+    "pip": "en-GB-SoniaNeural",     # Smart, British female
+    "zap": "en-US-JennyNeural",     # Fast, excitable female
+    "snooze": "en-US-RogerNeural",  # Slow, sleepy male
+}
+
+# Voice customization per character
+VOICE_SETTINGS = {
+    "bip": {"rate": "+15%", "pitch": "+10Hz", "volume": "+0%"},
+    "gloop": {"rate": "-5%", "pitch": "-20Hz", "volume": "+0%"},
+    "pip": {"rate": "+0%", "pitch": "+5Hz", "volume": "+0%"},
+    "zap": {"rate": "+25%", "pitch": "+15Hz", "volume": "+0%"},
+    "snooze": {"rate": "-20%", "pitch": "-10Hz", "volume": "-10%"},
+}
+
+async def generate_voice(text, voice, settings, output_path):
+    """Generate single voiceover using Edge TTS"""
+    communicate = edge_tts.Communicate(
+        text,
+        voice,
+        rate=settings["rate"],
+        pitch=settings["pitch"],
+        volume=settings["volume"]
+    )
+    await communicate.save(output_path)
+
+async def generate_all_audio(script_file, config):
+    with open(script_file) as f:
+        data = json.load(f)
+
+    week_num = data["week"]
+    audio_dir = Path(config["paths"]["output"]) / f"week_{week_num}" / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"🎙️ Generating audio for Week {week_num}...")
+
+    # Generate shorts audio
+    for short in data["shorts"]:
+        main_char = short["main_char"]
+        voice = VOICES[main_char]
+        settings = VOICE_SETTINGS[main_char]
+
+        for i, scene in enumerate(short["scenes"]):
+            text = scene["dialogue"]
+            out_file = audio_dir / f"short_{short['day']+1}_scene_{i}.mp3"
+
+            if out_file.exists():
+                print(f"  ⏭️  Exists: {out_file.name}")
+                continue
+
+            try:
+                await generate_voice(text, voice, settings, str(out_file))
+                print(f"  ✅ Short {short['day']+1} Scene {i}: {main_char}")
+            except Exception as e:
+                print(f"  ❌ Error: {e}")
+
+    # Generate episode audio
+    episode = data["episode"]
+    for i, scene in enumerate(episode["scenes"]):
+        chars = scene.get("chars", [])
+        dialogues = scene.get("dialogue", [])
+
+        for char, text in zip(chars, dialogues):
+            voice = VOICES.get(char, VOICES["bip"])
+            settings = VOICE_SETTINGS.get(char, VOICE_SETTINGS["bip"])
+            out_file = audio_dir / f"episode_scene_{i}_{char}.mp3"
+
+            if out_file.exists():
+                print(f"  ⏭️  Exists: {out_file.name}")
+                continue
+
+            try:
+                await generate_voice(text, voice, settings, str(out_file))
+                print(f"  ✅ Episode Scene {i}: {char}")
+            except Exception as e:
+                print(f"  ❌ Error: {e}")
+
+    print(f"\n✅ All audio generated for Week {week_num}")
+    print(f"📁 Saved to: {audio_dir}")
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--week", type=int, default=1)
+    parser.add_argument("--all", action="store_true")
+    args = parser.parse_args()
+
+    config = load_config()
+
+    if args.all:
+        for week in range(1, 53):
+            script_file = Path(config["paths"]["output"]) / f"week_{week}" / "scripts.json"
+            if script_file.exists():
+                asyncio.run(generate_all_audio(str(script_file), config))
+            else:
+                print(f"⚠️ Week {week} scripts not found, run generate_scripts.py first")
+    else:
+        script_file = Path(config["paths"]["output"]) / f"week_{args.week}" / "scripts.json"
+        if not script_file.exists():
+            print(f"❌ Scripts not found for week {args.week}")
+            print("Run: python generate_scripts.py --week", args.week)
+            sys.exit(1)
+        asyncio.run(generate_all_audio(str(script_file), config))
+
+if __name__ == "__main__":
+    main()
