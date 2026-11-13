@@ -8,13 +8,20 @@ import svgwrite
 import yaml
 from pathlib import Path
 
+
 def load_config():
     with open("config.yaml") as f:
         return yaml.safe_load(f)
 
+
 def create_directories(config):
+    base_assets = Path(config["paths"]["assets"])
+    for subdir in ["characters", "backgrounds", "audio"]:
+        (base_assets / subdir).mkdir(parents=True, exist_ok=True)
+
     for key, path in config["paths"].items():
         Path(path).mkdir(parents=True, exist_ok=True)
+
 
 def generate_character_svg(name, color, config):
     """Generate a simple cutout-style character SVG programmatically"""
@@ -84,6 +91,7 @@ def generate_character_svg(name, color, config):
 
     return dwg
 
+
 def generate_background_svg(name, color, config):
     """Generate simple background SVGs"""
     dwg = svgwrite.Drawing(size=("1920px", "1080px"))
@@ -107,6 +115,7 @@ def generate_background_svg(name, color, config):
         dwg.add(dwg.rect(insert=(300, 650), size=(400, 50), fill='#FFCCBC', stroke='black', stroke_width=2))  # pillow
 
     return dwg
+
 
 def generate_all_assets():
     config = load_config()
@@ -164,6 +173,7 @@ PLACE FILES HERE:
     print("\n✅ ALL ASSETS GENERATED!")
     print("📁 Check assets/ folder")
     print("📥 Download free music/SFX to assets/audio/ (see README.txt)")
+
 
 if __name__ == "__main__":
     generate_all_assets()
