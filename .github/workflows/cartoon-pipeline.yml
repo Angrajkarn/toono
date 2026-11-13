@@ -21,10 +21,12 @@
 name: 🎬 Weekly Cartoon Pipeline
 
 on:
+  push:
+    branches:
+      - master
   schedule:
-    # Runs every Monday at 10:00 UTC (adjust for your timezone)
-    - cron: '0 10 * * 1'  # Monday 10 AM UTC
-  workflow_dispatch:      # Manual trigger from GitHub UI
+    - cron: '0 10 * * 1'
+  workflow_dispatch:
     inputs:
       week:
         description: 'Week number (1-52, empty = auto)'
@@ -37,6 +39,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   build-and-upload:
