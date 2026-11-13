@@ -18,100 +18,28 @@
 #   base64 -w 0 token.pkl | pbcopy
 #   base64 -w 0 config.yaml | pbcopy
 
-name: 🎬 Weekly Cartoon Pipeline
-
-on:
-  push:
-    branches:
-      - master
-  schedule:
-    - cron: '0 10 * * 1'
-  workflow_dispatch:
-    inputs:
-      week:
-        description: 'Week number (1-52, empty = auto)'
-        required: false
-        type: string
-      force:
-        description: 'Force re-run even if done'
-        required: false
-        type: boolean
-
-permissions:
-  contents: read
-  issues: write
-
-jobs:
-  build-and-upload:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120  # 2 hours max (GitHub free limit)
-
-    steps:
-      # ─── CHECKOUT ───
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      # ─── SETUP PYTHON ───
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      # ─── INSTALL SYSTEM DEPENDENCIES ───
-      - name: 📦 Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            ffmpeg \
-            libcairo2 \
-            libpango-1.0-0 \
-            libpangocairo-1.0-0 \
-            libgdk-pixbuf-2.0-0 \
-            libffi-dev \
-            shared-mime-info \
-            inkscape \
-            texlive-latex-base \
-            texlive-fonts-recommended \
-            texlive-fonts-extra \
-            texlive-latex-extra
-
-      # ─── INSTALL PYTHON DEPENDENCIES ───
-      - name: 📦 Install Python dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
-      # ─── DECODE SECRETS ───
-      - name: 🔐 Decode secrets
-        run: |
-          echo "${{ secrets.YOUTUBE_CLIENT_SECRET }}" | base64 -d > client_secret.json
-          echo "${{ secrets.YOUTUBE_TOKEN }}" | base64 -d > token.pkl
-          echo "${{ secrets.CONFIG_YAML }}" | base64 -d > config.yaml
-
-      # ─── GENERATE ASSETS (if not cached) ───
-      - name: 🎨 Generate assets
-        run: python generate_assets.py
-
       # ─── DETERMINE WEEK ───
       - name: 📅 Determine week number
         id: week
+        shell: bash
         run: |
           if [ -n "${{ github.event.inputs.week }}" ]; then
-            echo "week=${{ github.event.inputs.week }}" >> $GITHUB_OUTPUT
+            echo "week=${{ github.event.inputs.week }}" >> "$GITHUB_OUTPUT"
           else
-            # Auto-calculate from config start_date or default
-            python -c "
-            import yaml, datetime
-            with open('config.yaml') as f:
-                cfg = yaml.safe_load(f)
-            start_str = cfg.get('automation', {}).get('start_date', '2025-01-06')
-            start = datetime.datetime.strptime(start_str, '%Y-%m-%d')
+            python - <<'PY' >> "$GITHUB_OUTPUT"
+            import datetime
+            import yaml
+
+            with open("config.yaml", "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+
+            start_str = cfg.get("automation", {}).get("start_date", "2025-01-06")
+            start = datetime.datetime.strptime(start_str, "%Y-%m-%d")
             now = datetime.datetime.utcnow()
             week = ((now - start).days // 7) + 1
             week = max(1, min(week, 52))
-            print(f'week={week}')
-            " >> $GITHUB_OUTPUT
+            print(f"week={week}")
+            PY
           fi
 
       # ─── GENERATE SCRIPTS ───
@@ -126,7 +54,6 @@ jobs:
       - name: 🎬 Render videos (MoviePy)
         run: python animate.py --week ${{ steps.week.outputs.week }}
         env:
-          # Speed up rendering on GitHub runners
           MOVIE_THREADS: 2
 
       # ─── UPLOAD TO YOUTUBE ───
@@ -144,16 +71,21 @@ jobs:
       # ─── NOTIFICATION ───
       - name: 📢 Notify on failure
         if: failure()
+        env:
+          WEEK: ${{ steps.week.outputs.week || 'unknown' }}
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.issues.create({
+            const week = process.env.WEEK || 'unknown';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `🚨 Pipeline failed - Week ${{ steps.week.outputs.week }}`,
-              body: `Automated cartoon pipeline failed. Check workflow run: ${context.runUrl}`,
+              title: `🚨 Pipeline failed - Week ${week}`,
+              body: `Automated cartoon pipeline failed. Check workflow run: ${runUrl}`,
               labels: ['bug', 'pipeline-failure']
-            })
+            });
 
 # ─── OPTIONAL: DAILY SHORTS ONLY (lighter, runs daily) ───
 # Uncomment to run shorts daily instead of weekly batch
