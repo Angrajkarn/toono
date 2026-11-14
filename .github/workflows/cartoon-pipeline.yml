@@ -143,20 +143,21 @@ jobs:
           if [ -n "${{ github.event.inputs.week }}" ]; then
             echo "week=${{ github.event.inputs.week }}" >> "$GITHUB_OUTPUT"
           else
-            python - <<'PY' >> "$GITHUB_OUTPUT"
-            import datetime
-            import yaml
+            python -c "
+import datetime
+import yaml
+import sys
 
-            with open("config.yaml", "r", encoding="utf-8") as f:
-                cfg = yaml.safe_load(f) or {}
+with open('config.yaml', 'r', encoding='utf-8') as f:
+    cfg = yaml.safe_load(f) or {}
 
-            start_str = cfg.get("automation", {}).get("start_date", "2025-01-06")
-            start = datetime.datetime.strptime(start_str, "%Y-%m-%d")
-            now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-            week = ((now - start).days // 7) + 1
-            week = max(1, min(week, 52))
-            print(f"week={week}")
-            PY
+start_str = cfg.get('automation', {}).get('start_date', '2025-01-06')
+start = datetime.datetime.strptime(start_str, '%Y-%m-%d')
+now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+week = ((now - start).days // 7) + 1
+week = max(1, min(week, 52))
+print(f'week={week}')
+" >> "$GITHUB_OUTPUT"
           fi
 
       # ─── GENERATE SCRIPTS ───
