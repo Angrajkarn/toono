@@ -229,9 +229,9 @@ def create_silent_audio(duration, output_path):
             "-t", str(duration), "-c:a", "libmp3lame", "-b:a", "128k",
             "-y", str(output_path)
         ], check=True, capture_output=True)
-        return True
+        return str(output_path)
     except Exception:
-        return False
+        return None
 
 
 def get_valid_audio_file(audio_file, expected_duration):
