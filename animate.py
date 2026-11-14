@@ -146,12 +146,15 @@ def animate_character(char_clip, scene, char_name, duration, video_type, char_si
 
     # Add dialogue bubble if there's dialogue
     if dialogue:
+        # Use DejaVu Sans (available on Ubuntu) instead of Arial
+        font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+
         # Create text clip for dialogue
         txt = TextClip(
             dialogue,
             fontsize=36 if video_type == "short" else 42,
             color='black',
-            font='Arial-Bold',
+            font=font_path,
             stroke_color='white',
             stroke_width=3,
             method='caption',
