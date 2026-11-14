@@ -50,18 +50,7 @@ jobs:
             libffi-dev \
             shared-mime-info \
             inkscape \
-            imagemagick \
             fonts-dejavu-core
-
-      # ─── FIX IMAGEMAGICK POLICY ───
-      - name: 🔧 Fix ImageMagick security policy
-        run: |
-          # Allow reading fonts and writing temp files
-          sudo sed -i 's/rights="none" pattern="PS"/rights="read" pattern="PS"/' /etc/ImageMagick-6/policy.xml 2>/dev/null || true
-          sudo sed -i 's/rights="none" pattern="PDF"/rights="read" pattern="PDF"/' /etc/ImageMagick-6/policy.xml 2>/dev/null || true
-          sudo sed -i '/<policy domain="path" rights="none" pattern="@\*"/d' /etc/ImageMagick-6/policy.xml 2>/dev/null || true
-          # Verify policy
-          cat /etc/ImageMagick-6/policy.xml | grep -E "policy|rights"
 
       # ─── INSTALL PYTHON DEPENDENCIES ───
       - name: 📦 Install Python dependencies

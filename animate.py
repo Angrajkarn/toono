@@ -12,6 +12,59 @@ from pathlib import Path
 from moviepy.editor import *
 from moviepy.video.tools.drawing import color_gradient
 
+def create_text_clip(text, video_type="short", duration=4):
+    """Create text clip using PIL (no ImageMagick needed)"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        import numpy as np
+
+        # Settings based on video type
+        if video_type == "short":
+            width, height = 700, 200
+            fontsize = 36
+        else:
+            width, height = 1000, 250
+            fontsize = 42
+
+        # Create transparent image
+        img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        # Load font
+        font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+        try:
+            font = ImageFont.truetype(font_path, fontsize)
+        except Exception:
+            font = ImageFont.load_default()
+
+        # Calculate text position (centered)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        x = (width - text_width) // 2
+        y = (height - text_height) // 2
+
+        # Draw stroke (white outline)
+        stroke_width = 3
+        for dx in range(-stroke_width, stroke_width + 1):
+            for dy in range(-stroke_width, stroke_width + 1):
+                if dx != 0 or dy != 0:
+                    draw.text((x + dx, y + dy), text, font=font, fill='white')
+
+        # Draw main text (black)
+        draw.text((x, y), text, font=font, fill='black')
+
+        # Convert to numpy array for MoviePy
+        img_array = np.array(img)
+
+        # Create ImageClip
+        txt_clip = ImageClip(img_array, transparent=True).set_duration(duration)
+        return txt_clip
+    except Exception as e:
+        print(f"  ⚠️ Failed to create text clip: {e}")
+        return None
+
+
 def load_config():
     with open("config.yaml") as f:
         return yaml.safe_load(f)
@@ -144,33 +197,21 @@ def animate_character(char_clip, scene, char_name, duration, video_type, char_si
 
     animated = animated.resize(scale_func)
 
-    # Add dialogue bubble if there's dialogue
+    # Add dialogue bubble if there's dialogue - use PIL instead of TextClip (no ImageMagick needed)
     if dialogue:
-        # Use DejaVu Sans (available on Ubuntu) instead of Arial
-        font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-
-        # Create text clip for dialogue
-        txt = TextClip(
+        txt_clip = create_text_clip(
             dialogue,
-            fontsize=36 if video_type == "short" else 42,
-            color='black',
-            font=font_path,
-            stroke_color='white',
-            stroke_width=3,
-            method='caption',
-            size=(700, 200) if video_type == "short" else (1000, 250),
-            align='center'
+            video_type=video_type,
+            duration=duration
         )
-        txt = txt.set_duration(duration)
-
-        # Position above character
-        if video_type == "short":
-            txt = txt.set_position(("center", 200))
-        else:
-            txt = txt.set_position(("center", 150))
-
-        # Combine character + text
-        animated = CompositeVideoClip([animated, txt])
+        if txt_clip:
+            # Position above character
+            if video_type == "short":
+                txt_clip = txt_clip.set_position(("center", 200))
+            else:
+                txt_clip = txt_clip.set_position(("center", 150))
+            # Combine character + text
+            animated = CompositeVideoClip([animated, txt_clip])
 
     return animated.set_duration(duration)
 
