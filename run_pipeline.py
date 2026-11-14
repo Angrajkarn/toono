@@ -63,6 +63,7 @@ def get_current_week(config):
         while start_date.weekday() != 0:  # Monday
             start_date += timedelta(days=1)
 
+    # Use UTC now for consistency with GitHub Actions
     now = datetime.now()
     week_num = ((now - start_date).days // 7) + 1
     return max(1, min(week_num, 52))

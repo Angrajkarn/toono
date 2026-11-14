@@ -18,6 +18,91 @@
 #   base64 -w 0 token.pkl | pbcopy
 #   base64 -w 0 config.yaml | pbcopy
 
+name: 🎬 Weekly Cartoon Pipeline
+
+on:
+  schedule:
+    # Runs every Monday at 10:00 UTC (adjust for your timezone)
+    - cron: '0 10 * * 1'  # Monday 10 AM UTC
+  workflow_dispatch:      # Manual trigger from GitHub UI
+    inputs:
+      week:
+        description: 'Week number (1-52, empty = auto)'
+        required: false
+        type: string
+      force:
+        description: 'Force re-run even if done'
+        required: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hours max (GitHub free limit)
+
+    steps:
+      # ─── CHECKOUT ───
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # ─── SETUP PYTHON ───
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ─── INSTALL SYSTEM DEPENDENCIES ───
+      - name: 📦 Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            libcairo2 \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libgdk-pixbuf-2.0-0 \
+            libffi-dev \
+            shared-mime-info \
+            inkscape
+
+      # ─── INSTALL PYTHON DEPENDENCIES ───
+      - name: 📦 Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ─── VALIDATE SECRETS ───
+      - name: ✅ Validate required secrets
+        run: |
+          if [ -z "${{ secrets.YOUTUBE_CLIENT_SECRET }}" ]; then
+            echo "❌ YOUTUBE_CLIENT_SECRET secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.YOUTUBE_TOKEN }}" ]; then
+            echo "❌ YOUTUBE_TOKEN secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.CONFIG_YAML }}" ]; then
+            echo "❌ CONFIG_YAML secret is not set"
+            exit 1
+          fi
+          echo "✅ All required secrets are configured"
+
+      # ─── DECODE SECRETS ───
+      - name: 🔐 Decode secrets
+        run: |
+          echo "${{ secrets.YOUTUBE_CLIENT_SECRET }}" | base64 -d > client_secret.json
+          echo "${{ secrets.YOUTUBE_TOKEN }}" | base64 -d > token.pkl
+          echo "${{ secrets.CONFIG_YAML }}" | base64 -d > config.yaml
+
+      # ─── GENERATE ASSETS (if not cached) ───
+      - name: 🎨 Generate assets
+        run: python generate_assets.py
+
       # ─── DETERMINE WEEK ───
       - name: 📅 Determine week number
         id: week
@@ -35,7 +120,7 @@
 
             start_str = cfg.get("automation", {}).get("start_date", "2025-01-06")
             start = datetime.datetime.strptime(start_str, "%Y-%m-%d")
-            now = datetime.datetime.utcnow()
+            now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
             week = ((now - start).days // 7) + 1
             week = max(1, min(week, 52))
             print(f"week={week}")
@@ -107,7 +192,7 @@
 #       - run: echo "${{ secrets.YOUTUBE_TOKEN }}" | base64 -d > token.pkl
 #       - run: echo "${{ secrets.CONFIG_YAML }}" | base64 -d > config.yaml
 #       - run: python generate_assets.py
-#       - run: python generate_scripts.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.utcnow()-s).days//7)+1; print(max(1,min(w,52)))")
-#       - run: python generate_audio.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.utcnow()-s).days//7)+1; print(max(1,min(w,52)))")
-#       - run: python animate.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.utcnow()-s).days//7)+1; print(max(1,min(w,52)))")
-#       - run: python upload.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.utcnow()-s).days//7)+1; print(max(1,min(w,52)))")
+#       - run: python generate_scripts.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)-s).days//7)+1; print(max(1,min(w,52)))")
+#       - run: python generate_audio.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)-s).days//7)+1; print(max(1,min(w,52)))")
+#       - run: python animate.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)-s).days//7)+1; print(max(1,min(w,52)))")
+#       - run: python upload.py --week $(python -c "import yaml,datetime; c=yaml.safe_load(open('config.yaml')); s=datetime.datetime.strptime(c.get('automation',{}).get('start_date','2025-01-06'),'%Y-%m-%d'); w=((datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)-s).days//7)+1; print(max(1,min(w,52)))")
