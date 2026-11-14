@@ -115,8 +115,8 @@ def create_character_clips(config, video_type):
 
         png_path = temp_dir / f"{name}_{video_type}.png"
         if svg_to_png(svg_path, png_path, size):
-            # Create base clip (will be duplicated and animated per scene)
-            clip = ImageClip(str(png_path)).set_duration(1)
+            # Create base clip WITHOUT duration - duration will be set per scene
+            clip = ImageClip(str(png_path))
             char_clips[name] = clip
 
     return char_clips, char_size
@@ -197,6 +197,9 @@ def animate_character(char_clip, scene, char_name, duration, video_type, char_si
 
     animated = animated.resize(scale_func)
 
+    # IMPORTANT: Set duration BEFORE compositing
+    animated = animated.set_duration(duration)
+
     # Add dialogue bubble if there's dialogue - use PIL instead of TextClip (no ImageMagick needed)
     if dialogue:
         txt_clip = create_text_clip(
@@ -212,6 +215,8 @@ def animate_character(char_clip, scene, char_name, duration, video_type, char_si
                 txt_clip = txt_clip.set_position(("center", 150))
             # Combine character + text
             animated = CompositeVideoClip([animated, txt_clip])
+            # Ensure duration is preserved after compositing
+            animated = animated.set_duration(duration)
 
     return animated.set_duration(duration)
 
@@ -296,16 +301,32 @@ def render_short(short_data, config, char_clips, bg_clips):
 
         # Combine
         scene_clip = CompositeVideoClip([bg, char_animated])
+        # Ensure scene clip has correct duration
+        scene_clip = scene_clip.set_duration(duration)
 
         # Add audio if available
         if valid_audio:
-            audio_clip = AudioFileClip(valid_audio)
-            scene_clip = scene_clip.set_audio(audio_clip)
+            try:
+                audio_clip = AudioFileClip(valid_audio)
+                scene_clip = scene_clip.set_audio(audio_clip)
+                print(f"  ✅ Audio attached to scene {i}: {audio_clip.duration:.1f}s")
+            except Exception as e:
+                print(f"  ⚠️ Failed to attach audio: {e}")
 
         clips.append(scene_clip)
 
     if not clips:
         return None
+
+    # Ensure all clips have the same fps and audio settings before concatenating
+    for i, clip in enumerate(clips):
+        clips[i] = clip.set_fps(config["video"]["shorts"]["fps"])
+        # If clip has no audio, add silent audio
+        if clip.audio is None:
+            print(f"  ⚠️ Clip {i} has no audio, adding silent track")
+            silent = create_silent_audio(clip.duration, Path(config["paths"]["temp"]) / f"silent_{i}.mp3")
+            if silent:
+                clips[i] = clip.set_audio(AudioFileClip(silent))
 
     # Concatenate all scenes
     final = concatenate_videoclips(clips, method="compose")
@@ -313,9 +334,13 @@ def render_short(short_data, config, char_clips, bg_clips):
     # Add background music
     music_file = Path(config["paths"]["assets"]) / "audio" / "happy_loop.mp3"
     if music_file.exists():
-        music = AudioFileClip(str(music_file)).volumex(0.08)
-        music = music.audio_loop(duration=final.duration)
-        final = final.set_audio(CompositeAudioClip([final.audio, music]))
+        try:
+            music = AudioFileClip(str(music_file)).volumex(0.08)
+            music = music.audio_loop(duration=final.duration)
+            final = final.set_audio(CompositeAudioClip([final.audio, music]))
+            print(f"  ✅ Background music added")
+        except Exception as e:
+            print(f"  ⚠️ Failed to add background music: {e}")
 
     return final
 
@@ -340,9 +365,13 @@ def render_episode(ep_data, config, char_clips, bg_clips):
             audio_file = audio_dir / f"episode_scene_{i}_{char}.mp3"
             valid_audio = get_valid_audio_file(audio_file, duration)
             if valid_audio:
-                audio = AudioFileClip(valid_audio)
-                audio_clips.append((char, audio))
-                max_duration = max(max_duration, audio.duration + 0.5)
+                try:
+                    audio = AudioFileClip(valid_audio)
+                    audio_clips.append((char, audio))
+                    max_duration = max(max_duration, audio.duration + 0.5)
+                    print(f"  ✅ Episode audio for {char}: {audio.duration:.1f}s")
+                except Exception as e:
+                    print(f"  ⚠️ Failed to load episode audio for {char}: {e}")
             else:
                 print(f"  ⚠️ No valid audio for episode scene {i} char {char}")
 
@@ -371,6 +400,7 @@ def render_episode(ep_data, config, char_clips, bg_clips):
             for c, audio in audio_clips:
                 if c == char:
                     char_animated = char_animated.set_audio(audio)
+                    print(f"  ✅ Attached audio to {char}")
                     break
 
             char_layers.append(char_animated)
@@ -381,10 +411,23 @@ def render_episode(ep_data, config, char_clips, bg_clips):
         else:
             scene_composite = bg
 
+        # Ensure scene has correct duration
+        scene_composite = scene_composite.set_duration(duration)
+
         clips.append(scene_composite)
 
     if not clips:
         return None
+
+    # Ensure all clips have the same fps and audio settings before concatenating
+    for i, clip in enumerate(clips):
+        clips[i] = clip.set_fps(config["video"]["episode"]["fps"])
+        # If clip has no audio, add silent audio
+        if clip.audio is None:
+            print(f"  ⚠️ Episode clip {i} has no audio, adding silent track")
+            silent = create_silent_audio(clip.duration, Path(config["paths"]["temp"]) / f"episode_silent_{i}.mp3")
+            if silent:
+                clips[i] = clip.set_audio(AudioFileClip(silent))
 
     # Concatenate
     final = concatenate_videoclips(clips, method="compose")
@@ -392,9 +435,13 @@ def render_episode(ep_data, config, char_clips, bg_clips):
     # Add background music
     music_file = Path(config["paths"]["assets"]) / "audio" / "happy_loop.mp3"
     if music_file.exists():
-        music = AudioFileClip(str(music_file)).volumex(0.08)
-        music = music.audio_loop(duration=final.duration)
-        final = final.set_audio(CompositeAudioClip([final.audio, music]))
+        try:
+            music = AudioFileClip(str(music_file)).volumex(0.08)
+            music = music.audio_loop(duration=final.duration)
+            final = final.set_audio(CompositeAudioClip([final.audio, music]))
+            print(f"  ✅ Episode background music added")
+        except Exception as e:
+            print(f"  ⚠️ Failed to add episode background music: {e}")
 
     return final
 
