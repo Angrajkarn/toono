@@ -171,6 +171,45 @@ def animate_character(char_clip, scene, char_name, duration, video_type, char_si
 
     return animated.set_duration(duration)
 
+def create_silent_audio(duration, output_path):
+    """Create a silent audio file as fallback"""
+    import subprocess
+    try:
+        subprocess.run([
+            "ffmpeg", "-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo",
+            "-t", str(duration), "-c:a", "libmp3lame", "-b:a", "128k",
+            "-y", str(output_path)
+        ], check=True, capture_output=True)
+        return True
+    except Exception:
+        return False
+
+
+def get_valid_audio_file(audio_file, expected_duration):
+    """Get a valid audio file, create silent fallback if needed"""
+    if audio_file.exists() and audio_file.stat().st_size > 1000:
+        # Validate with ffprobe
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(audio_file)],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                dur = float(result.stdout.strip())
+                if dur > 0:
+                    return str(audio_file)
+        except Exception:
+            pass
+
+    # Create silent fallback
+    fallback = audio_file.with_suffix('.silent.mp3')
+    if create_silent_audio(expected_duration + 0.5, fallback):
+        return str(fallback)
+    return None
+
+
 def render_short(short_data, config, char_clips, bg_clips):
     """Render a single short video"""
     scenes = short_data["scenes"]
@@ -187,9 +226,13 @@ def render_short(short_data, config, char_clips, bg_clips):
 
         # Load audio to get exact duration
         audio_file = audio_dir / f"short_{day+1}_scene_{i}.mp3"
-        if audio_file.exists():
-            audio_clip = AudioFileClip(str(audio_file))
+        valid_audio = get_valid_audio_file(audio_file, duration)
+
+        if valid_audio:
+            audio_clip = AudioFileClip(valid_audio)
             duration = max(duration, audio_clip.duration + 0.5)  # Small padding
+        else:
+            print(f"  ⚠️ No valid audio for scene {i}, using silent fallback")
 
         # Get background
         bg = bg_clips.get(bg_name)
@@ -210,8 +253,9 @@ def render_short(short_data, config, char_clips, bg_clips):
         # Combine
         scene_clip = CompositeVideoClip([bg, char_animated])
 
-        # Add audio
-        if audio_file.exists():
+        # Add audio if available
+        if valid_audio:
+            audio_clip = AudioFileClip(valid_audio)
             scene_clip = scene_clip.set_audio(audio_clip)
 
         clips.append(scene_clip)
@@ -250,10 +294,13 @@ def render_episode(ep_data, config, char_clips, bg_clips):
         audio_clips = []
         for char, dialogue in zip(chars, dialogues):
             audio_file = audio_dir / f"episode_scene_{i}_{char}.mp3"
-            if audio_file.exists():
-                audio = AudioFileClip(str(audio_file))
+            valid_audio = get_valid_audio_file(audio_file, duration)
+            if valid_audio:
+                audio = AudioFileClip(valid_audio)
                 audio_clips.append((char, audio))
                 max_duration = max(max_duration, audio.duration + 0.5)
+            else:
+                print(f"  ⚠️ No valid audio for episode scene {i} char {char}")
 
         duration = max_duration
 

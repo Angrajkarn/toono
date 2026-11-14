@@ -33,7 +33,9 @@ VOICE_SETTINGS = {
 }
 
 async def generate_voice(text, voice, settings, output_path):
-    """Generate single voiceover using Edge TTS"""
+    """Generate single voiceover using Edge TTS with validation"""
+    import subprocess
+
     communicate = edge_tts.Communicate(
         text,
         voice,
@@ -42,6 +44,43 @@ async def generate_voice(text, voice, settings, output_path):
         volume=settings["volume"]
     )
     await communicate.save(output_path)
+
+    # Validate the generated file
+    await validate_audio_file(output_path)
+
+
+async def validate_audio_file(file_path, max_retries=3):
+    """Validate audio file is playable by ffmpeg, retry if needed"""
+    import subprocess
+    import asyncio
+
+    for attempt in range(max_retries):
+        # Check file exists and has content
+        if not Path(file_path).exists():
+            raise Exception(f"File not created: {file_path}")
+
+        file_size = Path(file_path).stat().st_size
+        if file_size < 1000:  # Less than 1KB is likely corrupted
+            raise Exception(f"File too small ({file_size} bytes): {file_path}")
+
+        # Try to read with ffprobe
+        try:
+            result = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(file_path)],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                duration = float(result.stdout.strip())
+                if duration > 0:
+                    return  # Valid audio file
+        except Exception:
+            pass
+
+        if attempt < max_retries - 1:
+            await asyncio.sleep(1)
+            continue
+        raise Exception(f"Audio file validation failed after {max_retries} attempts: {file_path}")
 
 async def generate_all_audio(script_file, config):
     with open(script_file) as f:
