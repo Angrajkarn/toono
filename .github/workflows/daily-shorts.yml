@@ -1,0 +1,229 @@
+# 🎬 DAILY SHORTS - Runs EVERY DAY at 10:00 UTC
+# =================================================
+# Generates and uploads 1 short per day (Mon-Fri), episode on Saturday
+# No manual triggers needed - fully automated!
+
+name: 🎬 Daily Shorts Pipeline
+
+on:
+  schedule:
+    # Runs daily at 10:00 UTC (adjust for your timezone)
+    - cron: '0 10 * * *'  # Daily 10 AM UTC
+  workflow_dispatch:      # Manual trigger from GitHub UI
+    inputs:
+      force:
+        description: 'Force re-run even if already done today'
+        required: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  daily-short:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60  # 1 hour max per day
+
+    steps:
+      # ─── CHECKOUT ───
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # ─── SETUP PYTHON ───
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ─── INSTALL SYSTEM DEPENDENCIES ───
+      - name: 📦 Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            libcairo2 \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libgdk-pixbuf-2.0-0 \
+            libffi-dev \
+            shared-mime-info \
+            inkscape
+
+      # ─── INSTALL PYTHON DEPENDENCIES ───
+      - name: 📦 Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ─── VALIDATE SECRETS ───
+      - name: ✅ Validate required secrets
+        run: |
+          if [ -z "${{ secrets.YOUTUBE_CLIENT_SECRET }}" ]; then
+            echo "❌ YOUTUBE_CLIENT_SECRET secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.YOUTUBE_TOKEN }}" ]; then
+            echo "❌ YOUTUBE_TOKEN secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.CONFIG_YAML }}" ]; then
+            echo "❌ CONFIG_YAML secret is not set"
+            exit 1
+          fi
+          echo "✅ All required secrets are configured"
+
+      # ─── DECODE SECRETS ───
+      - name: 🔐 Decode secrets
+        run: |
+          # Trim whitespace and decode
+          echo "${{ secrets.YOUTUBE_CLIENT_SECRET }}" | tr -d '\r\n ' | base64 -d > client_secret.json
+          echo "${{ secrets.YOUTUBE_TOKEN }}" | tr -d '\r\n ' | base64 -d > token.pkl
+          echo "${{ secrets.CONFIG_YAML }}" | tr -d '\r\n ' | base64 -d > config.yaml
+
+          # Verify decoded files
+          echo "Verifying decoded files..."
+          [ -s client_secret.json ] && echo "✅ client_secret.json OK" || { echo "❌ client_secret.json empty"; exit 1; }
+          [ -s token.pkl ] && echo "✅ token.pkl OK" || { echo "❌ token.pkl empty"; exit 1; }
+          [ -s config.yaml ] && echo "✅ config.yaml OK" || { echo "❌ config.yaml empty"; exit 1; }
+
+      # ─── GENERATE ASSETS (if not cached) ───
+      - name: 🎨 Generate assets
+        run: python generate_assets.py
+
+      # ─── VERIFY ASSETS ───
+      - name: ✅ Verify assets generated
+        run: |
+          echo "Checking character assets..."
+          ls -la assets/characters/
+          echo "Checking background assets..."
+          ls -la assets/backgrounds/
+          echo "Checking audio assets..."
+          ls -la assets/audio/
+          # Verify all 5 character SVGs exist
+          for char in bip gloop pip zap snooze; do
+            if [ ! -f "assets/characters/${char}.svg" ]; then
+              echo "❌ Missing: assets/characters/${char}.svg"
+              exit 1
+            fi
+          done
+          # Verify all 4 background SVGs exist
+          for bg in room park kitchen bedroom; do
+            if [ ! -f "assets/backgrounds/${bg}.svg" ]; then
+              echo "❌ Missing: assets/backgrounds/${bg}.svg"
+              exit 1
+            fi
+          done
+          echo "✅ All assets verified"
+
+      # ─── DETERMINE WEEK AND DAY ───
+      - name: 📅 Determine week and day
+        id: schedule
+        run: |
+          python -c "
+import datetime
+import yaml
+import sys
+
+with open('config.yaml', 'r', encoding='utf-8') as f:
+    cfg = yaml.safe_load(f) or {}
+
+start_str = cfg.get('automation', {}).get('start_date', '2025-01-06')
+start = datetime.datetime.strptime(start_str, '%Y-%m-%d')
+now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+# Calculate week (1-52)
+week = ((now - start).days // 7) + 1
+week = max(1, min(week, 52))
+
+# Calculate day of week (0=Mon, 4=Fri, 5=Sat, 6=Sun)
+# Monday=0, so we use weekday() which returns 0=Monday
+day_of_week = now.weekday()  # 0=Mon, 6=Sun
+
+# For daily shorts: Mon-Fri (0-4) = shorts, Sat (5) = episode, Sun (6) = skip
+if day_of_week <= 4:  # Mon-Fri
+    content_type = 'short'
+    day_index = day_of_week
+elif day_of_week == 5:  # Saturday
+    content_type = 'episode'
+    day_index = 0  # Only one episode per week
+else:  # Sunday
+    content_type = 'none'
+    day_index = -1
+
+print(f'week={week}')
+print(f'day_index={day_index}')
+print(f'content_type={content_type}')
+print(f'day_of_week={day_of_week}')
+" >> "$GITHUB_OUTPUT"
+
+      # ─── SKIP IF SUNDAY ───
+      - name: ⏭️ Skip Sunday
+        if: steps.schedule.outputs.content_type == 'none'
+        run: |
+          echo "📅 Today is Sunday - skipping (no content scheduled)"
+          exit 0
+
+      # ─── GENERATE SCRIPTS ───
+      - name: 📝 Generate scripts
+        if: steps.schedule.outputs.content_type != 'none'
+        run: python generate_scripts.py --week ${{ steps.schedule.outputs.week }}
+
+      # ─── GENERATE AUDIO ───
+      - name: 🎙️ Generate voiceovers (Edge TTS)
+        if: steps.schedule.outputs.content_type != 'none'
+        run: python generate_audio.py --week ${{ steps.schedule.outputs.week }}
+
+      # ─── RENDER VIDEOS ───
+      - name: 🎬 Render videos (MoviePy)
+        if: steps.schedule.outputs.content_type != 'none'
+        run: |
+          # Retry up to 2 times for transient rendering issues
+          for attempt in 1 2; do
+            echo "🎬 Render attempt $attempt..."
+            if python animate.py --week ${{ steps.schedule.outputs.week }}; then
+              echo "✅ Render succeeded"
+              break
+            else
+              echo "⚠️ Render failed, attempt $attempt"
+              if [ $attempt -eq 2 ]; then
+                echo "❌ All render attempts failed"
+                exit 1
+              fi
+              sleep 30
+            fi
+          done
+        env:
+          MOVIE_THREADS: 2
+
+      # ─── UPLOAD TO YOUTUBE ───
+      - name: 📤 Upload to YouTube
+        if: steps.schedule.outputs.content_type != 'none'
+        run: python upload.py --week ${{ steps.schedule.outputs.week }}
+
+      # ─── CLEANUP ───
+      - name: 🧹 Cleanup temp files
+        if: always()
+        run: |
+          rm -rf temp/
+          find output -name "*.png" -delete
+          find output -name "*.wav" -delete
+
+      # ─── NOTIFICATION ───
+      - name: 📢 Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const week = '${{ steps.schedule.outputs.week }}' || 'unknown';
+            const contentType = '${{ steps.schedule.outputs.content_type }}' || 'unknown';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Daily pipeline failed - Week ${week} (${contentType})`,
+              body: `Automated daily pipeline failed. Check workflow run: ${runUrl}`,
+              labels: ['bug', 'pipeline-failure']
+            })
