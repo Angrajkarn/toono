@@ -70,3 +70,22 @@ automation:
   github_repo: "Angrajkarn/toono"  # Your GitHub repo
   start_date: "2025-01-06"    # First Monday to start counting weeks from
   keep_days: 30               # Clean up old render files
+
+# MoneyPrinter Enhancements
+ollama:
+  base_url: "http://localhost:11434"  # Ollama server URL
+  model: "llama3.1:8b"                # Model to use (must be pulled: ollama pull llama3.1:8b)
+  timeout: 120                         # Request timeout in seconds
+
+pexels:
+  api_key: ""  # Get from https://www.pexels.com/api/ (free)
+
+# Video Composition (MoneyPrinter style)
+composition:
+  use_stock_videos: true      # Use Pexels stock footage as backgrounds
+  use_svg_fallback: true      # Fallback to SVG if no stock video
+  subtitle_enabled: true      # Burn subtitles onto video
+  background_music_volume: 0.1  # 10% volume for background music
+  target_resolution:
+    short: [1080, 1920]       # Vertical for Shorts
+    episode: [1920, 1080]     # Horizontal for episodes

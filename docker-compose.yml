@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  # Main pipeline runner
+  pipeline:
+    build: .
+    container_name: toonora-pipeline
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=llama3.1:8b
+      - OLLAMA_TIMEOUT=120
+      - PEXELS_API_KEY=${PEXELS_API_KEY:-}
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./assets:/app/assets
+      - ./output:/app/output
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+    depends_on:
+      - ollama
+    command: >
+      sh -c "
+        echo 'Waiting for Ollama...' &&
+        until curl -s http://ollama:11434/api/tags > /dev/null; do sleep 5; done &&
+        python enhanced_pipeline.py --week=1
+      "
+    restart: "no"
+
+  # Ollama LLM server
+  ollama:
+    image: ollama/ollama:latest
+    container_name: toonora-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+
+  # PostgreSQL for job queue (MoneyPrinter style)
+  postgres:
+    image: postgres:16-alpine
+    container_name: toonora-postgres
+    environment:
+      - POSTGRES_DB=toonora
+      - POSTGRES_USER=toonora
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-toonora123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U toonora -d toonora"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: API server for web UI (MoneyPrinter style)
+  api:
+    build: .
+    container_name: toonora-api
+    command: python -m uvicorn api:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./assets:/app/assets
+      - ./output:/app/output
+    environment:
+      - DATABASE_URL=postgresql://toonora:toonora123@postgres:5432/toonora
+      - OLLAMA_BASE_URL=http://ollama:11434
+    depends_on:
+      - postgres
+      - ollama
+    restart: unless-stopped
+
+  # Optional: Worker for background processing
+  worker:
+    build: .
+    container_name: toonora-worker
+    command: python worker.py
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./assets:/app/assets
+      - ./output:/app/output
+    environment:
+      - DATABASE_URL=postgresql://toonora:toonora123@postgres:5432/toonora
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - PEXELS_API_KEY=${PEXELS_API_KEY:-}
+    depends_on:
+      - postgres
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  postgres_data:
