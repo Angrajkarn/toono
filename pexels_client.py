@@ -15,7 +15,8 @@ class PexelsClient:
     def __init__(self, config_path: str = "config.yaml"):
         self.config = self._load_config(config_path)
         self.pexels_config = self.config.get("pexels", {})
-        self.api_key = self.pexels_config.get("api_key", os.getenv("PEXELS_API_KEY"))
+        # Priority: env var > config.yaml
+        self.api_key = os.getenv("PEXELS_API_KEY") or self.pexels_config.get("api_key", "")
         self.base_url = "https://api.pexels.com/videos"
         self.headers = {"Authorization": self.api_key} if self.api_key else {}
 

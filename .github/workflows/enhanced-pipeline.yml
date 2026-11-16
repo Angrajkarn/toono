@@ -75,11 +75,7 @@ jobs:
               exit 1
             fi
           done
-          # Optional secrets
-          if [ -z "${{ secrets.PEXELS_API_KEY }}" ]; then
-            echo "⚠️ PEXELS_API_KEY not set - stock videos disabled"
-          fi
-          echo "✅ Secrets validated"
+          echo "✅ Required secrets validated"
 
       # ─── DECODE SECRETS ───
       - name: 🔐 Decode secrets
@@ -87,10 +83,20 @@ jobs:
           echo "${{ secrets.YOUTUBE_CLIENT_SECRET }}" | tr -d '\r\n ' | base64 -d > client_secret.json
           echo "${{ secrets.YOUTUBE_TOKEN }}" | tr -d '\r\n ' | base64 -d > token.pkl
           echo "${{ secrets.CONFIG_YAML }}" | tr -d '\r\n ' | base64 -d > config.yaml
-          # Add Pexels API key to config if provided
-          if [ -n "${{ secrets.PEXELS_API_KEY }}" ]; then
-            sed -i "s/api_key: \"\"/api_key: \"${{ secrets.PEXELS_API_KEY }}\"/" config.yaml
-          fi
+
+      # ─── SET PEXELS API KEY (optional) ───
+      - name: 🔑 Configure Pexels API
+        if: ${{ secrets.PEXELS_API_KEY != '' }}
+        run: |
+          echo "✅ PEXELS_API_KEY secret found - configuring..."
+          echo "PEXELS_API_KEY=${{ secrets.PEXELS_API_KEY }}" >> $GITHUB_ENV
+        env:
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+
+      - name: ⚠️ Pexels not configured
+        if: ${{ secrets.PEXELS_API_KEY == '' }}
+        run: |
+          echo "⚠️ PEXELS_API_KEY secret not set - stock videos will use SVG fallback"
 
       # ─── INSTALL OLLAMA ───
       - name: 🦙 Install Ollama
