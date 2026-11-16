@@ -1,0 +1,164 @@
+# 🎬 ENHANCED PIPELINE - AI + Stock Videos (Manual Only)
+# =========================================================
+# Uses Ollama LLM for scripts + Pexels for stock footage
+# Trigger manually from GitHub Actions tab
+# NOT scheduled - too resource intensive for free runners
+
+name: 🤖 Enhanced Pipeline (AI + Stock)
+
+on:
+  workflow_dispatch:
+    inputs:
+      week:
+        description: 'Week number (1-52, empty = auto)'
+        required: false
+        type: string
+      use_ai:
+        description: 'Use Ollama LLM for script generation'
+        required: false
+        type: boolean
+        default: true
+      use_stock:
+        description: 'Use Pexels stock videos for backgrounds'
+        required: false
+        type: boolean
+        default: true
+      upload:
+        description: 'Upload to YouTube'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  enhanced-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # ─── CHECKOUT ───
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # ─── SETUP PYTHON ───
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ─── INSTALL SYSTEM DEPENDENCIES ───
+      - name: 📦 Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            libcairo2 \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libgdk-pixbuf-2.0-0 \
+            libffi-dev \
+            shared-mime-info \
+            inkscape \
+            fonts-dejavu-core
+
+      # ─── VALIDATE SECRETS ───
+      - name: ✅ Validate required secrets
+        run: |
+          REQUIRED_SECRETS=("YOUTUBE_CLIENT_SECRET" "YOUTUBE_TOKEN" "CONFIG_YAML")
+          for secret in "${REQUIRED_SECRETS[@]}"; do
+            if [ -z "${{ secrets[secret] }}" ]; then
+              echo "❌ $secret secret is not set"
+              exit 1
+            fi
+          done
+          # Optional secrets
+          if [ -z "${{ secrets.PEXELS_API_KEY }}" ]; then
+            echo "⚠️ PEXELS_API_KEY not set - stock videos disabled"
+          fi
+          echo "✅ Secrets validated"
+
+      # ─── DECODE SECRETS ───
+      - name: 🔐 Decode secrets
+        run: |
+          echo "${{ secrets.YOUTUBE_CLIENT_SECRET }}" | tr -d '\r\n ' | base64 -d > client_secret.json
+          echo "${{ secrets.YOUTUBE_TOKEN }}" | tr -d '\r\n ' | base64 -d > token.pkl
+          echo "${{ secrets.CONFIG_YAML }}" | tr -d '\r\n ' | base64 -d > config.yaml
+          # Add Pexels API key to config if provided
+          if [ -n "${{ secrets.PEXELS_API_KEY }}" ]; then
+            sed -i "s/api_key: \"\"/api_key: \"${{ secrets.PEXELS_API_KEY }}\"/" config.yaml
+          fi
+
+      # ─── INSTALL OLLAMA ───
+      - name: 🦙 Install Ollama
+        if: ${{ github.event.inputs.use_ai == 'true' }}
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          export PATH=$PATH:/usr/local/bin
+          ollama serve &
+          sleep 5
+          ollama pull llama3.1:8b
+          echo "OLLAMA_BASE_URL=http://localhost:11434" >> $GITHUB_ENV
+
+      # ─── INSTALL PYTHON DEPENDENCIES ───
+      - name: 📦 Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-enhanced.txt
+
+      # ─── DETERMINE WEEK ───
+      - name: 📅 Determine week number
+        id: week
+        run: |
+          if [ -n "${{ github.event.inputs.week }}" ]; then
+            echo "week=${{ github.event.inputs.week }}" >> $GITHUB_OUTPUT
+          else
+            python3 -c "
+import datetime, yaml
+with open('config.yaml') as f:
+    cfg = yaml.safe_load(f) or {}
+start_str = cfg.get('automation', {}).get('start_date', '2025-01-06')
+start = datetime.datetime.strptime(start_str, '%Y-%m-%d')
+now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+week = ((now - start).days // 7) + 1
+week = max(1, min(week, 52))
+print(f'week={week}')
+" >> $GITHUB_OUTPUT
+          fi
+
+      # ─── RUN ENHANCED PIPELINE ───
+      - name: 🤖 Run Enhanced Pipeline
+        env:
+          USE_AI: ${{ github.event.inputs.use_ai }}
+          USE_STOCK: ${{ github.event.inputs.use_stock }}
+          UPLOAD: ${{ github.event.inputs.upload }}
+        run: |
+          python enhanced_pipeline.py --week=${{ steps.week.outputs.week }} \
+            ${USE_AI:+--no-ai} \
+            ${USE_STOCK:+--no-stock} \
+            ${UPLOAD:+--no-upload}
+
+      # ─── CLEANUP ───
+      - name: 🧹 Cleanup temp files
+        if: always()
+        run: |
+          rm -rf temp/
+          find output -name "*.png" -delete
+          find output -name "*.wav" -delete
+
+      # ─── NOTIFICATION ───
+      - name: 📢 Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Enhanced Pipeline failed - Week ${{ steps.week.outputs.week }}`,
+              body: `Enhanced pipeline failed. Check workflow run: ${context.runUrl}`,
+              labels: ['bug', 'pipeline-failure', 'enhanced']
+            })
