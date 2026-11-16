@@ -187,8 +187,11 @@ def animate_character(char_clip, scene, char_name, duration, video_type, char_si
 
         return (x, y), 1.0
 
+    # FIRST: Set duration on base clip (required for lambda animations to work)
+    animated = char_clip.set_duration(duration)
+
     # Apply position animation
-    animated = char_clip.set_position(lambda t: pos_func(t)[0])
+    animated = animated.set_position(lambda t: pos_func(t)[0])
 
     # Apply scale animation (breathing)
     def scale_func(t):
@@ -196,9 +199,6 @@ def animate_character(char_clip, scene, char_name, duration, video_type, char_si
         return scale
 
     animated = animated.resize(scale_func)
-
-    # IMPORTANT: Set duration BEFORE compositing
-    animated = animated.set_duration(duration)
 
     # Add dialogue bubble if there's dialogue - use PIL instead of TextClip (no ImageMagick needed)
     if dialogue:
@@ -215,8 +215,6 @@ def animate_character(char_clip, scene, char_name, duration, video_type, char_si
                 txt_clip = txt_clip.set_position(("center", 150))
             # Combine character + text
             animated = CompositeVideoClip([animated, txt_clip])
-            # Ensure duration is preserved after compositing
-            animated = animated.set_duration(duration)
 
     return animated.set_duration(duration)
 
